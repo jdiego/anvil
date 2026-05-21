@@ -1,0 +1,38 @@
+# Copy this file to ~/.config/anvil/contexts.yaml and adjust.
+#
+# token_keychain is the *name* of the secret in your local secret store.
+# It is never the secret itself. Store the actual token like:
+#
+#   security add-generic-password \
+#     -a "$USER" \
+#     -s "anvil/sentry/example" \
+#     -w
+#
+# or, for development/CI, export an env var derived from the service name
+# (slashes/dashes -> underscores, uppercased):
+#
+#   export ANVIL_SENTRY_EXAMPLE=...
+
+contexts:
+  # Each context must configure at least one service.
+  example:
+    sentry:
+      base_url: "https://sentry.example.com"
+      token_keychain: "anvil/sentry/example"
+    gitlab:
+      base_url: "https://gitlab.example.com"
+      token_keychain: "anvil/gitlab/example"
+    github:
+      base_url: "https://api.github.com"
+      token_keychain: "anvil/github/example"
+
+  # staging:
+  #   sentry:
+  #     base_url: "https://sentry.staging.example.com"
+  #     token_keychain: "anvil/sentry/staging"
+  #   gitlab:
+  #     base_url: "https://gitlab.staging.example.com"
+  #     token_keychain: "anvil/gitlab/staging"
+  #   github:
+  #     base_url: "https://github.staging.example.com/api/v3"
+  #     token_keychain: "anvil/github/staging"
