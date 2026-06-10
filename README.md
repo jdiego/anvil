@@ -65,9 +65,19 @@ Current resources:
 
 - `contexts://list` — read-only discovery of configured contexts and public upstream base URLs. Secret identifiers and token values are omitted.
 
-Current prompts:
+Current Claude Code skills:
 
-- `review-sentry-issue` — structured triage prompt that tells the agent how to fetch a Sentry issue, identify the root cause, propose a fix, and prepare an MR draft without creating one.
+- `fix-sentry-issue`
+- `review-sentry-issue`
+- `debug-pipeline`
+- `review-merge-request`
+- `investigate-production-error`
+- `prepare-release-summary`
+- `create-hotfix-plan`
+
+Current MCP prompts:
+
+- The same workflow names above are exposed as transitional MCP prompts for clients that support MCP prompts but do not support Claude Code skills. They are generated from the same `skills/*/SKILL.md` files to avoid drift.
 
 Each tool advertises MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so hosts can decide when to prompt for confirmation.
 
@@ -78,6 +88,9 @@ anvil/
 ├── pyproject.toml
 ├── README.md
 ├── contexts.yaml.example
+├── .claude-plugin/
+│   └── plugin.json     # Claude Code plugin metadata
+├── skills/             # Claude Code workflow skills
 ├── src/anvil/
 │   ├── cli.py          # CLI entrypoint (serve | doctor)
 │   ├── server.py       # FastMCP wiring only
@@ -255,9 +268,21 @@ OpenCode:
 
 Use an absolute checkout path in MCP client configuration, then restart the client.
 
+## Claude Code Plugin
+
+This repository also ships Claude Code skills for workflow guidance. The MCP server remains the source of API primitives; skills describe how an agent should combine those tools.
+
+For local development, load the plugin from the checkout:
+
+```bash
+claude --plugin-dir /absolute/path/to/anvil
+```
+
+Installed plugin skills are namespaced by the plugin name, for example `/anvil:fix-sentry-issue`.
+
 ## Development Philosophy
 
-The MCP should remain stateless, avoid storing secrets, support multiple contexts, keep authentication centralized, expose clean tools for coding agents, and separate transport/authentication from workflow logic.
+The MCP should remain stateless, avoid storing secrets, support multiple contexts, keep authentication centralized, and expose clean tools/resources for coding agents. Workflow guidance belongs in skills. MCP prompts are transitional aliases backed by the same skill markdown.
 
 ## License
 

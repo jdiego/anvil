@@ -172,16 +172,14 @@ def build_server() -> FastMCP:
     mcp.prompt(
         "debug-pipeline",
         description=(
-            "Diagnose a failed GitLab or GitHub Actions pipeline and recommend "
-            "a retry or code fix."
+            "Diagnose a failed GitLab or GitHub Actions pipeline and recommend a retry or code fix."
         ),
     )(debug_pipeline)
 
     mcp.prompt(
         "review-merge-request",
         description=(
-            "Review a GitLab MR or GitHub PR diff and provide structured, "
-            "actionable feedback."
+            "Review a GitLab MR or GitHub PR diff and provide structured, actionable feedback."
         ),
     )(review_merge_request)
 

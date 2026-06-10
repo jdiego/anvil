@@ -62,9 +62,10 @@ def test_list_contexts_resource_omits_unconfigured_services(
 def test_review_sentry_issue_prompt_mentions_expected_workflow() -> None:
     prompt = review_sentry_issue("https://sentry.example.com/issues/42/")
 
-    assert "Call get_sentry_issue" in prompt
+    assert "Call `get_sentry_issue`" in prompt
     assert "https://sentry.example.com/issues/42/" in prompt
     assert "Do not create a GitLab merge request" in prompt
+    assert "## Invocation Parameters" in prompt
 
 
 @pytest.mark.asyncio
