@@ -125,6 +125,25 @@ async def create_pull_request(
     return result  # type: ignore[no-any-return]
 
 
+async def update_pull_request(
+    base_url: str,
+    token: str,
+    repository: str,
+    pull_number: int,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "PATCH",
+            f"{_api_root(base_url)}/repos/{_repo_path(repository)}/pulls/{pull_number}",
+            service=SERVICE,
+            headers=github_headers(token),
+            json=payload,
+        )
+    return result  # type: ignore[no-any-return]
+
+
 async def list_pull_request_files(
     base_url: str,
     token: str,
