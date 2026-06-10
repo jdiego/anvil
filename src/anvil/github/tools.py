@@ -106,15 +106,18 @@ async def list_github_pull_requests(
         state=payload.state,
         base=payload.base,
         head=payload.head,
+        limit=payload.limit,
     )
     total = len(prs)
     selected = prs[: payload.limit]
     summaries = [_pull_request_summary(pr) for pr in selected]
-    truncated = total > len(selected)
+    returned = len(summaries)
+    # GitHub is asked for `limit` rows; a full page means more may exist upstream.
+    truncated = returned < total or returned == payload.limit
     warnings: list[str] = []
     if truncated:
         warnings.append(
-            f"Returned {len(summaries)} of {total} pull requests; "
+            f"Returned {returned} of at least {max(total, returned)} pull requests; "
             f"raise limit (max 100) or filter by state/base/head to see more."
         )
 
@@ -122,7 +125,7 @@ async def list_github_pull_requests(
         "list_github_pull_requests",
         context=name,
         repository=payload.repository,
-        pull_requests=len(summaries),
+        pull_requests=returned,
         total=total,
     )
 
@@ -130,7 +133,7 @@ async def list_github_pull_requests(
         context=name,
         pull_requests=summaries,
         total=total,
-        returned=len(summaries),
+        returned=returned,
         truncated=truncated,
         warnings=warnings,
     )

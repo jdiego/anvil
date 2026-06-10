@@ -170,15 +170,18 @@ async def list_sentry_issues(payload: ListSentryIssuesInput) -> ListSentryIssues
         payload.project_slug,
         query=query,
         environment=payload.environment,
+        limit=payload.limit,
     )
 
     total = len(issues)
     selected = issues[: payload.limit]
-    truncated = total > len(selected)
+    returned = len(selected)
+    # Sentry is asked for `limit` rows; a full page means more may exist upstream.
+    truncated = returned < total or returned == payload.limit
     warnings: list[str] = []
     if truncated:
         warnings.append(
-            f"Returned {len(selected)} of {total} issues; "
+            f"Returned {returned} of at least {max(total, returned)} issues; "
             f"raise limit (max 100) or refine the query to see more."
         )
 
@@ -187,14 +190,14 @@ async def list_sentry_issues(payload: ListSentryIssuesInput) -> ListSentryIssues
         context=name,
         organization_slug=payload.organization_slug,
         project_slug=payload.project_slug,
-        count=len(selected),
+        count=returned,
         total=total,
     )
     return ListSentryIssuesOutput(
         context=name,
         issues=[SentryIssueSummary.model_validate(issue) for issue in selected],
         total=total,
-        returned=len(selected),
+        returned=returned,
         truncated=truncated,
         warnings=warnings,
     )

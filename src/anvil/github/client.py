@@ -53,10 +53,11 @@ async def list_pull_requests(
     state: str,
     base: str | None = None,
     head: str | None = None,
+    limit: int = 50,
 ) -> list[dict[str, Any]]:
     params: dict[str, Any] = {
         "state": state,
-        "per_page": 50,
+        "per_page": limit,
         "sort": "updated",
         "direction": "desc",
     }

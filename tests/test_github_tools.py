@@ -118,7 +118,7 @@ async def test_list_github_pull_requests_applies_limit_and_flags_truncation(
     github_contexts_yaml: Path,
     github_env_secret: None,
 ) -> None:
-    respx.get("https://api.github.com/repos/owner/repo/pulls").mock(
+    route = respx.get("https://api.github.com/repos/owner/repo/pulls").mock(
         return_value=Response(
             200,
             json=[
@@ -140,6 +140,8 @@ async def test_list_github_pull_requests_applies_limit_and_flags_truncation(
     assert output.total == 5
     assert output.truncated is True
     assert any("limit" in warning.lower() for warning in output.warnings)
+    # `limit` must reach GitHub as per_page so callers can fetch more than the old 50.
+    assert route.calls.last.request.url.params["per_page"] == "2"
 
 
 @pytest.mark.asyncio

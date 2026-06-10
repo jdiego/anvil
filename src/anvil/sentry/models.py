@@ -85,7 +85,9 @@ class ListSentryIssuesOutput(BaseModel):
     issues: list[SentryIssueSummary]
     total: int = Field(description="Issues returned by Sentry before the limit was applied.")
     returned: int = Field(description="Issues included in this response after the limit.")
-    truncated: bool = Field(description="True when total exceeded limit and results were trimmed.")
+    truncated: bool = Field(
+        description="True when the upstream page filled the limit, so more issues may exist."
+    )
     warnings: list[str] = Field(default_factory=list)
 
 

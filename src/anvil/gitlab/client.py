@@ -142,10 +142,11 @@ async def list_merge_requests(
     *,
     state: str,
     author: str | None = None,
+    limit: int = 50,
 ) -> list[dict[str, Any]]:
     params: dict[str, Any] = {
         "state": state,
-        "per_page": 50,
+        "per_page": limit,
         "order_by": "updated_at",
         "sort": "desc",
     }

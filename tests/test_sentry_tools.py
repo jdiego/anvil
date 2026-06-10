@@ -163,7 +163,9 @@ async def test_list_sentry_issues_applies_limit_and_flags_truncation(
     fake_contexts_yaml: Path,
     env_secrets: None,
 ) -> None:
-    respx.get("https://sentry.example.com/api/0/projects/example-org/backend/issues/").mock(
+    route = respx.get(
+        "https://sentry.example.com/api/0/projects/example-org/backend/issues/"
+    ).mock(
         return_value=Response(
             200,
             json=[{"id": str(i), "title": f"Issue {i}"} for i in range(5)],
@@ -185,6 +187,8 @@ async def test_list_sentry_issues_applies_limit_and_flags_truncation(
     assert output.truncated is True
     assert output.warnings
     assert any("limit" in warning.lower() for warning in output.warnings)
+    # `limit` must reach Sentry so callers can fetch more than the old hard-coded 25.
+    assert route.calls.last.request.url.params["limit"] == "2"
 
 
 @pytest.mark.asyncio

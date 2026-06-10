@@ -56,7 +56,9 @@ class ListPullRequestsOutput(BaseModel):
     pull_requests: list[PullRequestSummary]
     total: int = Field(description="PRs returned by GitHub before the limit was applied.")
     returned: int = Field(description="PRs included in this response after the limit.")
-    truncated: bool = Field(description="True when total exceeded limit and results were trimmed.")
+    truncated: bool = Field(
+        description="True when the upstream page filled the limit, so more PRs may exist."
+    )
     warnings: list[str] = Field(default_factory=list)
 
 

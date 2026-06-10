@@ -813,15 +813,18 @@ async def list_gitlab_merge_requests(
         payload.project_path,
         state=payload.state,
         author=payload.author,
+        limit=payload.limit,
     )
 
     total = len(merge_requests)
     selected = merge_requests[: payload.limit]
-    truncated = total > len(selected)
+    returned = len(selected)
+    # GitLab is asked for `limit` rows; a full page means more may exist upstream.
+    truncated = returned < total or returned == payload.limit
     warnings: list[str] = []
     if truncated:
         warnings.append(
-            f"Returned {len(selected)} of {total} merge requests; "
+            f"Returned {returned} of at least {max(total, returned)} merge requests; "
             f"raise limit (max 100) or filter by state/author to see more."
         )
 
@@ -830,7 +833,7 @@ async def list_gitlab_merge_requests(
         context=name,
         project_path=payload.project_path,
         state=payload.state,
-        count=len(selected),
+        count=returned,
         total=total,
     )
 
@@ -838,7 +841,7 @@ async def list_gitlab_merge_requests(
         context=name,
         merge_requests=[_mr_summary(mr) for mr in selected],
         total=total,
-        returned=len(selected),
+        returned=returned,
         truncated=truncated,
         warnings=warnings,
     )

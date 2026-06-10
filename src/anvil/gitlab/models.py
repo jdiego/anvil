@@ -141,7 +141,9 @@ class ListMergeRequestsOutput(BaseModel):
     merge_requests: list[MergeRequestSummary]
     total: int = Field(description="MRs returned by GitLab before the limit was applied.")
     returned: int = Field(description="MRs included in this response after the limit.")
-    truncated: bool = Field(description="True when total exceeded limit and results were trimmed.")
+    truncated: bool = Field(
+        description="True when the upstream page filled the limit, so more MRs may exist."
+    )
     warnings: list[str] = Field(default_factory=list)
 
 
