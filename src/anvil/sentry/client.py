@@ -70,8 +70,9 @@ async def list_project_issues(
     *,
     query: str | None = None,
     environment: str | None = None,
+    limit: int = 25,
 ) -> list[dict[str, Any]]:
-    params: dict[str, Any] = {"limit": 25}
+    params: dict[str, Any] = {"limit": limit}
     if query:
         params["query"] = query
     if environment:

@@ -217,6 +217,40 @@ async def test_list_merge_requests_returns_compact_summaries(
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_list_merge_requests_applies_limit_and_flags_truncation(
+    fake_contexts_yaml: Path,
+    env_secrets: None,
+) -> None:
+    route = respx.get(
+        "https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests"
+    ).mock(
+        return_value=Response(
+            200,
+            json=[
+                {"iid": i, "title": f"feat {i}", "state": "opened"} for i in range(5)
+            ],
+        )
+    )
+
+    result = await list_gitlab_merge_requests(
+        ListMergeRequestsInput(
+            context_url="https://gitlab.example.com/group/project",
+            project_path="group/project",
+            limit=2,
+        )
+    )
+
+    assert len(result.merge_requests) == 2
+    assert result.returned == 2
+    assert result.total == 5
+    assert result.truncated is True
+    assert any("limit" in warning.lower() for warning in result.warnings)
+    # `limit` must reach GitLab as per_page so callers can fetch more than the old 50.
+    assert route.calls.last.request.url.params["per_page"] == "2"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_compare_refs_returns_counts_and_commit_titles(
     fake_contexts_yaml: Path,
     env_secrets: None,

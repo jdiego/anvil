@@ -53,6 +53,7 @@ Current tools:
 - `compare_github_refs` — read-only, compares refs and returns compact commit/file counts.
 - `get_github_workflow_run_status` — read-only, returns workflow run metadata + jobs.
 - `get_github_actions_job_log` — read-only, fetches a truncated GitHub Actions job log tail.
+- `create_github_pull_request` — destructive, opens a GitHub PR after confirmation (dry-run otherwise).
 - `post_gitlab_mr_comment` — destructive, posts MR note/discussion after confirmation.
 - `post_gitlab_mr_line_comment` — destructive, posts an inline diff comment after confirmation.
 - `approve_gitlab_merge_request` — destructive, approves an MR after confirmation.
@@ -79,7 +80,11 @@ Current MCP prompts:
 
 - The same workflow names above are exposed as transitional MCP prompts for clients that support MCP prompts but do not support Claude Code skills. They are generated from the same `skills/*/SKILL.md` files to avoid drift.
 
-Each tool advertises MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so hosts can decide when to prompt for confirmation.
+Each tool advertises MCP annotations (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so hosts can render a confirmation UI and decide when to prompt. List tools accept a `limit` (default 25, max 100) and report `total`/`returned`/`truncated`/`warnings` so agents never silently miss results.
+
+### Tool surface and scaling
+
+anvil currently exposes ~30 tools — at the top of the "one tool per action" range. The MCP tool list lands in the model's context window on every turn, so the surface is bounded deliberately. **Decision:** the next upstream service (or a meaningful batch of new actions) should switch from one-tool-per-action to a `search_actions` + `execute_action` pattern (optionally promoting the 3–5 most-used tools to dedicated entries) rather than adding more flat tools. Reference: the `build-mcp-server` skill (`mcp-server-dev` plugin), `references/tool-design.md`.
 
 ## Project Structure
 

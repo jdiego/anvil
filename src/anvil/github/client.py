@@ -53,10 +53,11 @@ async def list_pull_requests(
     state: str,
     base: str | None = None,
     head: str | None = None,
+    limit: int = 50,
 ) -> list[dict[str, Any]]:
     params: dict[str, Any] = {
         "state": state,
-        "per_page": 50,
+        "per_page": limit,
         "sort": "updated",
         "direction": "desc",
     }
@@ -90,6 +91,36 @@ async def get_pull_request(
             f"{_api_root(base_url)}/repos/{_repo_path(repository)}/pulls/{pull_number}",
             service=SERVICE,
             headers=github_headers(token),
+        )
+    return result  # type: ignore[no-any-return]
+
+
+async def create_pull_request(
+    base_url: str,
+    token: str,
+    repository: str,
+    *,
+    head: str,
+    base: str,
+    title: str,
+    body: str,
+    draft: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": title,
+        "head": head,
+        "base": base,
+        "body": body,
+        "draft": draft,
+    }
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "POST",
+            f"{_api_root(base_url)}/repos/{_repo_path(repository)}/pulls",
+            service=SERVICE,
+            headers=github_headers(token),
+            json=payload,
         )
     return result  # type: ignore[no-any-return]
 

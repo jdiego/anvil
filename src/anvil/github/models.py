@@ -43,11 +43,63 @@ class ListPullRequestsInput(GitHubRepositoryInput):
         default=None,
         description="Optional head filter in the form 'user:branch' or 'org:branch'.",
     )
+    limit: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+        description="Max PR summaries to return. Hard cap at 100; defaults to 25.",
+    )
 
 
 class ListPullRequestsOutput(BaseModel):
     context: str
     pull_requests: list[PullRequestSummary]
+    total: int = Field(description="PRs returned by GitHub before the limit was applied.")
+    returned: int = Field(description="PRs included in this response after the limit.")
+    truncated: bool = Field(
+        description="True when the upstream page filled the limit, so more PRs may exist."
+    )
+    warnings: list[str] = Field(default_factory=list)
+
+
+class CreatePullRequestInput(GitHubRepositoryInput):
+    head: str = Field(
+        min_length=1,
+        description="Source branch with the changes; use 'owner:branch' for a cross-fork PR.",
+    )
+    base: str = Field(
+        min_length=1,
+        default="main",
+        description="Target branch the PR merges into.",
+    )
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(
+        default="",
+        description="Markdown body. Include rationale, screenshots, and test plan.",
+    )
+    draft: bool = Field(
+        default=False,
+        description="If true, the pull request is opened as a draft.",
+    )
+    confirm: bool = Field(
+        default=False,
+        description=(
+            "Safety flag. The PR is only created when this is true. "
+            "When false, the tool returns a dry-run preview of what would be sent."
+        ),
+    )
+
+
+class CreatePullRequestOutput(BaseModel):
+    context: str
+    number: int | None = None
+    html_url: HttpUrl | None = None
+    title: str
+    draft: bool | None = None
+    dry_run: bool = Field(
+        default=False,
+        description="True when the caller did not set confirm=True; no PR was created.",
+    )
 
 
 class CompareRefsInput(GitHubRepositoryInput):

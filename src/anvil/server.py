@@ -5,6 +5,7 @@ from fastmcp import FastMCP
 from anvil.doctor import doctor_report
 from anvil.github.tools import (
     compare_github_refs,
+    create_github_pull_request,
     get_github_actions_job_log,
     get_github_pull_request_diff,
     get_github_workflow_run_status,
@@ -57,93 +58,75 @@ def build_server() -> FastMCP:
 
     mcp = FastMCP("anvil")
 
+    # Read-only tool that touches no upstream (pure local context resolution).
     mcp.tool(
         resolve_sentry_context,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False},
-    )
-    mcp.tool(
-        get_sentry_issue,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
-    mcp.tool(
-        list_sentry_issues,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
-    mcp.tool(
-        get_sentry_release,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
-    for read_only_tool in (
-        resolve_github_context,
-        list_github_pull_requests,
-        get_github_pull_request_diff,
-        compare_github_refs,
-        get_github_workflow_run_status,
-        get_github_actions_job_log,
-    ):
-        mcp.tool(
-            read_only_tool,
-            annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-        )
-    mcp.tool(
-        create_gitlab_merge_request,
         annotations={
-            "readOnlyHint": False,
-            "destructiveHint": True,
-            "idempotentHint": False,
-            "openWorldHint": True,
+            "title": "Resolve Sentry Context",
+            "readOnlyHint": True,
+            "idempotentHint": True,
+            "openWorldHint": False,
         },
     )
-    mcp.tool(
-        get_gitlab_pipeline_status,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
+
+    # Read-only tools that call an upstream API. Title is required by the
+    # Anthropic Directory review and drives the host's connector listing.
+    read_only_tools = (
+        (get_sentry_issue, "Get Sentry Issue"),
+        (list_sentry_issues, "List Sentry Issues"),
+        (get_sentry_release, "Get Sentry Release"),
+        (resolve_github_context, "Resolve GitHub Context"),
+        (list_github_pull_requests, "List GitHub Pull Requests"),
+        (get_github_pull_request_diff, "Get GitHub Pull Request Diff"),
+        (compare_github_refs, "Compare GitHub Refs"),
+        (get_github_workflow_run_status, "Get GitHub Workflow Run Status"),
+        (get_github_actions_job_log, "Get GitHub Actions Job Log"),
+        (get_gitlab_pipeline_status, "Get GitLab Pipeline Status"),
+        (get_gitlab_job_log, "Get GitLab Job Log"),
+        (diagnose_gitlab_pipeline_failure, "Diagnose GitLab Pipeline Failure"),
+        (list_gitlab_merge_requests, "List GitLab Merge Requests"),
+        (compare_gitlab_refs, "Compare GitLab Refs"),
+        (get_gitlab_mr_diff, "Get GitLab Merge Request Diff"),
+        (doctor_report, "Doctor Report"),
     )
-    mcp.tool(
-        get_gitlab_job_log,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
+    for read_only_tool, read_only_title in read_only_tools:
+        mcp.tool(
+            read_only_tool,
+            annotations={
+                "title": read_only_title,
+                "readOnlyHint": True,
+                "idempotentHint": True,
+                "openWorldHint": True,
+            },
+        )
+
+    # Destructive tools — mutate upstream state, gated behind a confirm flag.
+    destructive_tools = (
+        (create_github_pull_request, "Create GitHub Pull Request"),
+        (create_gitlab_merge_request, "Create GitLab Merge Request"),
+        (retry_gitlab_failed_jobs, "Retry GitLab Failed Jobs"),
+        (cancel_gitlab_pipeline, "Cancel GitLab Pipeline"),
+        (post_gitlab_mr_comment, "Post GitLab MR Comment"),
+        (post_gitlab_mr_line_comment, "Post GitLab MR Line Comment"),
+        (approve_gitlab_merge_request, "Approve GitLab Merge Request"),
+        (set_gitlab_mr_ready, "Set GitLab MR Ready"),
+        (trigger_gitlab_pipeline, "Trigger GitLab Pipeline"),
+        (assign_sentry_issue, "Assign Sentry Issue"),
+        (resolve_sentry_issue, "Resolve Sentry Issue"),
+        (link_sentry_issue_to_mr, "Link Sentry Issue to Merge Request"),
+        (open_fix_mr_from_sentry, "Open Fix MR from Sentry Issue"),
     )
-    mcp.tool(
-        diagnose_gitlab_pipeline_failure,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
-    mcp.tool(
-        list_gitlab_merge_requests,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
-    mcp.tool(
-        compare_gitlab_refs,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
-    mcp.tool(
-        get_gitlab_mr_diff,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
-    for destructive_tool in (
-        retry_gitlab_failed_jobs,
-        cancel_gitlab_pipeline,
-        post_gitlab_mr_comment,
-        post_gitlab_mr_line_comment,
-        approve_gitlab_merge_request,
-        set_gitlab_mr_ready,
-        trigger_gitlab_pipeline,
-        assign_sentry_issue,
-        resolve_sentry_issue,
-        link_sentry_issue_to_mr,
-        open_fix_mr_from_sentry,
-    ):
+    for destructive_tool, destructive_title in destructive_tools:
         mcp.tool(
             destructive_tool,
             annotations={
+                "title": destructive_title,
                 "readOnlyHint": False,
                 "destructiveHint": True,
                 "idempotentHint": False,
                 "openWorldHint": True,
             },
         )
-    mcp.tool(
-        doctor_report,
-        annotations={"readOnlyHint": True, "idempotentHint": True, "openWorldHint": True},
-    )
 
     mcp.resource(
         "contexts://list",

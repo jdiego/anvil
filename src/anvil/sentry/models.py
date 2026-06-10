@@ -72,11 +72,23 @@ class ListSentryIssuesInput(SentryProjectInput):
         default=None,
         description="Optional relative age filter appended as age:<value>, e.g. '24h' or '7d'.",
     )
+    limit: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+        description="Max issue summaries to return. Hard cap at 100; defaults to 25.",
+    )
 
 
 class ListSentryIssuesOutput(BaseModel):
     context: str
     issues: list[SentryIssueSummary]
+    total: int = Field(description="Issues returned by Sentry before the limit was applied.")
+    returned: int = Field(description="Issues included in this response after the limit.")
+    truncated: bool = Field(
+        description="True when the upstream page filled the limit, so more issues may exist."
+    )
+    warnings: list[str] = Field(default_factory=list)
 
 
 class AssignSentryIssueInput(BaseModel):

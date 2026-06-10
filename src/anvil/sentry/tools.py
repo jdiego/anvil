@@ -37,7 +37,11 @@ _logger = get_logger(__name__)
 
 def _sentry_service(ctx_name: str, ctx: Context) -> ServiceContext:
     if ctx.sentry is None:
-        raise ContextNotFoundError(f"Context {ctx_name!r} has no Sentry service configured")
+        raise ContextNotFoundError(
+            f"Context {ctx_name!r} has no Sentry service configured. "
+            f"List configured contexts via the contexts://list resource, "
+            f"or run doctor_report to verify setup."
+        )
     return ctx.sentry
 
 
@@ -146,7 +150,8 @@ async def list_sentry_issues(payload: ListSentryIssuesInput) -> ListSentryIssues
       }
 
     Returns:
-      Up to 25 compact issue summaries.
+      Compact issue summaries (default 25, max 100 via `limit`) plus `total`,
+      `returned`, `truncated`, and `warnings` describing any trimming.
 
     Side effects:
       Read-only. Performs an authenticated GET request to Sentry.
@@ -165,18 +170,36 @@ async def list_sentry_issues(payload: ListSentryIssuesInput) -> ListSentryIssues
         payload.project_slug,
         query=query,
         environment=payload.environment,
+        limit=payload.limit,
     )
+
+    total = len(issues)
+    selected = issues[: payload.limit]
+    returned = len(selected)
+    # Sentry is asked for `limit` rows; a full page means more may exist upstream.
+    truncated = returned < total or returned == payload.limit
+    warnings: list[str] = []
+    if truncated:
+        warnings.append(
+            f"Returned {returned} of at least {max(total, returned)} issues; "
+            f"raise limit (max 100) or refine the query to see more."
+        )
 
     _logger.info(
         "list_sentry_issues",
         context=name,
         organization_slug=payload.organization_slug,
         project_slug=payload.project_slug,
-        count=len(issues),
+        count=returned,
+        total=total,
     )
     return ListSentryIssuesOutput(
         context=name,
-        issues=[SentryIssueSummary.model_validate(issue) for issue in issues],
+        issues=[SentryIssueSummary.model_validate(issue) for issue in selected],
+        total=total,
+        returned=returned,
+        truncated=truncated,
+        warnings=warnings,
     )
 
 
@@ -343,7 +366,11 @@ def _extract_issue_id(url: str) -> str:
         idx = parts.index("issues")
         return parts[idx + 1]
     except (ValueError, IndexError) as exc:
-        raise InvalidInputError(f"Could not extract Sentry issue id from URL: {url}") from exc
+        raise InvalidInputError(
+            f"Could not extract Sentry issue id from URL: {url}. "
+            f"Provide a full issue URL containing '/issues/<id>/'; "
+            f"use list_sentry_issues to discover valid issue URLs."
+        ) from exc
 
 
 def _issue_query(query: str | None, age: str | None) -> str | None:
