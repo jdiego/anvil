@@ -42,7 +42,11 @@ _logger = get_logger(__name__)
 def _github_service(ctx_name: str, ctx: object) -> Any:
     github = getattr(ctx, "github", None)
     if github is None:
-        raise ContextNotFoundError(f"Context {ctx_name!r} has no GitHub service configured")
+        raise ContextNotFoundError(
+            f"Context {ctx_name!r} has no GitHub service configured. "
+            f"List configured contexts via the contexts://list resource, "
+            f"or run doctor_report to verify setup."
+        )
     return github
 
 
@@ -79,6 +83,10 @@ async def list_github_pull_requests(
       - You need recent pull requests for a repository.
       - You need a bounded PR list filtered by state, base, or head.
 
+    Returns:
+      Compact PR summaries (default 25, max 100 via `limit`) plus `total`,
+      `returned`, `truncated`, and `warnings` describing any trimming.
+
     Side effects:
       Read-only. Performs an authenticated GET request to GitHub.
     """
@@ -96,16 +104,33 @@ async def list_github_pull_requests(
         base=payload.base,
         head=payload.head,
     )
-    summaries = [_pull_request_summary(pr) for pr in prs]
+    total = len(prs)
+    selected = prs[: payload.limit]
+    summaries = [_pull_request_summary(pr) for pr in selected]
+    truncated = total > len(selected)
+    warnings: list[str] = []
+    if truncated:
+        warnings.append(
+            f"Returned {len(summaries)} of {total} pull requests; "
+            f"raise limit (max 100) or filter by state/base/head to see more."
+        )
 
     _logger.info(
         "list_github_pull_requests",
         context=name,
         repository=payload.repository,
         pull_requests=len(summaries),
+        total=total,
     )
 
-    return ListPullRequestsOutput(context=name, pull_requests=summaries)
+    return ListPullRequestsOutput(
+        context=name,
+        pull_requests=summaries,
+        total=total,
+        returned=len(summaries),
+        truncated=truncated,
+        warnings=warnings,
+    )
 
 
 async def get_github_pull_request_diff(

@@ -116,6 +116,12 @@ class ListMergeRequestsInput(GitLabProjectInput):
         default=None,
         description="Optional GitLab username to filter by author.",
     )
+    limit: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+        description="Max MR summaries to return. Hard cap at 100; defaults to 25.",
+    )
 
 
 class MergeRequestSummary(BaseModel):
@@ -133,6 +139,10 @@ class MergeRequestSummary(BaseModel):
 class ListMergeRequestsOutput(BaseModel):
     context: str
     merge_requests: list[MergeRequestSummary]
+    total: int = Field(description="MRs returned by GitLab before the limit was applied.")
+    returned: int = Field(description="MRs included in this response after the limit.")
+    truncated: bool = Field(description="True when total exceeded limit and results were trimmed.")
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CompareRefsInput(GitLabProjectInput):

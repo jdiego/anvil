@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 import respx
+import yaml
 from httpx import Response
 
-from anvil.exceptions import InvalidInputError
+from anvil.exceptions import ContextNotFoundError, InvalidInputError
 from anvil.sentry.models import (
     AssignSentryIssueInput,
     GetSentryIssueInput,
@@ -81,10 +82,42 @@ async def test_get_sentry_issue_rejects_url_without_issue_id(
     fake_contexts_yaml: Path,
     env_secrets: None,
 ) -> None:
-    with pytest.raises(InvalidInputError):
+    with pytest.raises(InvalidInputError, match="list_sentry_issues") as excinfo:
         await get_sentry_issue(
             GetSentryIssueInput(url="https://sentry.example.com/some/other/path")
         )
+
+    assert "/issues/<id>/" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_resolve_sentry_context_without_sentry_service_hints_recovery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "contexts.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "contexts": {
+                    "gitlab-only": {
+                        "gitlab": {
+                            "base_url": "https://gitlab.example.com",
+                            "token_keychain": "anvil/gitlab/example",
+                        },
+                    },
+                },
+            }
+        )
+    )
+    monkeypatch.setattr("anvil.config.CONFIG_PATH", path)
+
+    with pytest.raises(ContextNotFoundError, match="doctor_report") as excinfo:
+        await resolve_sentry_context(
+            ResolveSentryContextInput(url="https://gitlab.example.com/group/project")
+        )
+
+    assert "contexts://list" in str(excinfo.value)
 
 
 @pytest.mark.asyncio
@@ -122,6 +155,36 @@ async def test_list_sentry_issues_returns_summaries(
     assert output.issues[0].short_id == "BACKEND-42"
     assert route.calls.last.request.url.params["query"] == "is:unresolved level:error age:24h"
     assert route.calls.last.request.url.params["environment"] == "production"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_list_sentry_issues_applies_limit_and_flags_truncation(
+    fake_contexts_yaml: Path,
+    env_secrets: None,
+) -> None:
+    respx.get("https://sentry.example.com/api/0/projects/example-org/backend/issues/").mock(
+        return_value=Response(
+            200,
+            json=[{"id": str(i), "title": f"Issue {i}"} for i in range(5)],
+        )
+    )
+
+    output = await list_sentry_issues(
+        ListSentryIssuesInput(
+            context_url="https://sentry.example.com/",
+            organization_slug="example-org",
+            project_slug="backend",
+            limit=2,
+        )
+    )
+
+    assert len(output.issues) == 2
+    assert output.returned == 2
+    assert output.total == 5
+    assert output.truncated is True
+    assert output.warnings
+    assert any("limit" in warning.lower() for warning in output.warnings)
 
 
 @pytest.mark.asyncio

@@ -67,7 +67,11 @@ _logger = get_logger(__name__)
 
 def _gitlab_service(ctx_name: str, ctx: Context) -> ServiceContext:
     if ctx.gitlab is None:
-        raise ContextNotFoundError(f"Context {ctx_name!r} has no GitLab service configured")
+        raise ContextNotFoundError(
+            f"Context {ctx_name!r} has no GitLab service configured. "
+            f"List configured contexts via the contexts://list resource, "
+            f"or run doctor_report to verify setup."
+        )
     return ctx.gitlab
 
 
@@ -790,8 +794,9 @@ async def list_gitlab_merge_requests(
       }
 
     Returns:
-      Compact MR summaries with iid, title, state, branches, author, updated_at,
-      and web_url.
+      Compact MR summaries (default 25, max 100 via `limit`) with iid, title,
+      state, branches, author, updated_at, and web_url, plus `total`, `returned`,
+      `truncated`, and `warnings` describing any trimming.
 
     Side effects:
       Read-only. Performs an authenticated GET request to GitLab.
@@ -810,17 +815,32 @@ async def list_gitlab_merge_requests(
         author=payload.author,
     )
 
+    total = len(merge_requests)
+    selected = merge_requests[: payload.limit]
+    truncated = total > len(selected)
+    warnings: list[str] = []
+    if truncated:
+        warnings.append(
+            f"Returned {len(selected)} of {total} merge requests; "
+            f"raise limit (max 100) or filter by state/author to see more."
+        )
+
     _logger.info(
         "list_merge_requests",
         context=name,
         project_path=payload.project_path,
         state=payload.state,
-        count=len(merge_requests),
+        count=len(selected),
+        total=total,
     )
 
     return ListMergeRequestsOutput(
         context=name,
-        merge_requests=[_mr_summary(mr) for mr in merge_requests],
+        merge_requests=[_mr_summary(mr) for mr in selected],
+        total=total,
+        returned=len(selected),
+        truncated=truncated,
+        warnings=warnings,
     )
 
 

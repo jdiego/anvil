@@ -111,6 +111,36 @@ async def test_list_github_pull_requests_returns_summaries(
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_list_github_pull_requests_applies_limit_and_flags_truncation(
+    github_contexts_yaml: Path,
+    github_env_secret: None,
+) -> None:
+    respx.get("https://api.github.com/repos/owner/repo/pulls").mock(
+        return_value=Response(
+            200,
+            json=[
+                {"number": i, "title": f"feat {i}", "state": "open"} for i in range(5)
+            ],
+        )
+    )
+
+    output = await list_github_pull_requests(
+        ListPullRequestsInput(
+            context_url="https://api.github.com/repos/owner/repo",
+            repository="owner/repo",
+            limit=2,
+        )
+    )
+
+    assert len(output.pull_requests) == 2
+    assert output.returned == 2
+    assert output.total == 5
+    assert output.truncated is True
+    assert any("limit" in warning.lower() for warning in output.warnings)
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_get_github_pull_request_diff_returns_bounded_patches(
     github_contexts_yaml: Path,
     github_env_secret: None,

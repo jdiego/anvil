@@ -79,7 +79,11 @@ Current MCP prompts:
 
 - The same workflow names above are exposed as transitional MCP prompts for clients that support MCP prompts but do not support Claude Code skills. They are generated from the same `skills/*/SKILL.md` files to avoid drift.
 
-Each tool advertises MCP annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so hosts can decide when to prompt for confirmation.
+Each tool advertises MCP annotations (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) so hosts can render a confirmation UI and decide when to prompt. List tools accept a `limit` (default 25, max 100) and report `total`/`returned`/`truncated`/`warnings` so agents never silently miss results.
+
+### Tool surface and scaling
+
+anvil currently exposes ~29 tools — within the "one tool per action" range. The MCP tool list lands in the model's context window on every turn, so the surface is bounded deliberately. **Decision:** when a new upstream service would push the total past ~30 tools, switch from one-tool-per-action to a `search_actions` + `execute_action` pattern (optionally promoting the 3–5 most-used tools to dedicated entries) rather than adding more flat tools. Reference: the `build-mcp-server` skill (`mcp-server-dev` plugin), `references/tool-design.md`.
 
 ## Project Structure
 

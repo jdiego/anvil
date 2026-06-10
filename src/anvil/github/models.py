@@ -43,11 +43,21 @@ class ListPullRequestsInput(GitHubRepositoryInput):
         default=None,
         description="Optional head filter in the form 'user:branch' or 'org:branch'.",
     )
+    limit: int = Field(
+        default=25,
+        ge=1,
+        le=100,
+        description="Max PR summaries to return. Hard cap at 100; defaults to 25.",
+    )
 
 
 class ListPullRequestsOutput(BaseModel):
     context: str
     pull_requests: list[PullRequestSummary]
+    total: int = Field(description="PRs returned by GitHub before the limit was applied.")
+    returned: int = Field(description="PRs included in this response after the limit.")
+    truncated: bool = Field(description="True when total exceeded limit and results were trimmed.")
+    warnings: list[str] = Field(default_factory=list)
 
 
 class CompareRefsInput(GitHubRepositoryInput):
