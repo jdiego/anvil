@@ -94,6 +94,36 @@ async def get_pull_request(
     return result  # type: ignore[no-any-return]
 
 
+async def create_pull_request(
+    base_url: str,
+    token: str,
+    repository: str,
+    *,
+    head: str,
+    base: str,
+    title: str,
+    body: str,
+    draft: bool,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "title": title,
+        "head": head,
+        "base": base,
+        "body": body,
+        "draft": draft,
+    }
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "POST",
+            f"{_api_root(base_url)}/repos/{_repo_path(repository)}/pulls",
+            service=SERVICE,
+            headers=github_headers(token),
+            json=payload,
+        )
+    return result  # type: ignore[no-any-return]
+
+
 async def list_pull_request_files(
     base_url: str,
     token: str,

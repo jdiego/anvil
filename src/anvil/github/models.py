@@ -60,6 +60,46 @@ class ListPullRequestsOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class CreatePullRequestInput(GitHubRepositoryInput):
+    head: str = Field(
+        min_length=1,
+        description="Source branch with the changes; use 'owner:branch' for a cross-fork PR.",
+    )
+    base: str = Field(
+        min_length=1,
+        default="main",
+        description="Target branch the PR merges into.",
+    )
+    title: str = Field(min_length=1, max_length=255)
+    body: str = Field(
+        default="",
+        description="Markdown body. Include rationale, screenshots, and test plan.",
+    )
+    draft: bool = Field(
+        default=False,
+        description="If true, the pull request is opened as a draft.",
+    )
+    confirm: bool = Field(
+        default=False,
+        description=(
+            "Safety flag. The PR is only created when this is true. "
+            "When false, the tool returns a dry-run preview of what would be sent."
+        ),
+    )
+
+
+class CreatePullRequestOutput(BaseModel):
+    context: str
+    number: int | None = None
+    html_url: HttpUrl | None = None
+    title: str
+    draft: bool | None = None
+    dry_run: bool = Field(
+        default=False,
+        description="True when the caller did not set confirm=True; no PR was created.",
+    )
+
+
 class CompareRefsInput(GitHubRepositoryInput):
     base_ref: str = Field(description="Base ref, e.g. a previous tag or main.")
     head_ref: str = Field(description="Head ref, e.g. a branch, SHA, or newer tag.")

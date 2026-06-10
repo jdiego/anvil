@@ -6,6 +6,7 @@ from anvil.contexts import resolve_context
 from anvil.exceptions import ContextNotFoundError
 from anvil.github.client import (
     compare_refs,
+    create_pull_request,
     get_pull_request,
     get_workflow_run,
     list_pull_request_files,
@@ -18,6 +19,8 @@ from anvil.github.client import (
 from anvil.github.models import (
     CompareRefsInput,
     CompareRefsOutput,
+    CreatePullRequestInput,
+    CreatePullRequestOutput,
     GetActionsJobLogInput,
     GetActionsJobLogOutput,
     GetPullRequestDiffInput,
@@ -130,6 +133,96 @@ async def list_github_pull_requests(
         returned=len(summaries),
         truncated=truncated,
         warnings=warnings,
+    )
+
+
+async def create_github_pull_request(
+    payload: CreatePullRequestInput,
+) -> CreatePullRequestOutput:
+    """Create a GitHub pull request in the configured context.
+
+    Use when:
+      - You have already pushed the head branch to GitHub.
+      - You know the base branch (defaults to 'main').
+      - You can produce a meaningful title and description.
+
+    Do not use when:
+      - You need to update, review, merge, or close an existing PR.
+      - The head branch has not been pushed yet.
+      - The user has not confirmed creation.
+
+    Input example:
+      {
+        "context_url": "https://api.github.com/repos/owner/repo",
+        "repository": "owner/repo",
+        "head": "fix/sentry-42",
+        "base": "main",
+        "title": "fix: handle missing payload field",
+        "body": "Root cause, fix, and test plan.",
+        "draft": false,
+        "confirm": false
+      }
+
+    Returns:
+      A compact PR summary: context, number, html_url, title, draft, and
+      dry_run. When confirm=false, no upstream call is made and number/html_url
+      are null.
+
+    Side effects:
+      Destructive and non-idempotent when confirm=true. A successful call
+      creates a new GitHub PR visible to other users and may trigger GitHub
+      notifications. Reversing it requires manually closing the PR.
+    """
+
+    context_url = str(payload.context_url)
+    name, ctx = resolve_context(context_url)
+    github = _github_service(name, ctx)
+
+    if not payload.confirm:
+        _logger.info(
+            "create_github_pull_request_dry_run",
+            context=name,
+            repository=payload.repository,
+            head=payload.head,
+            base=payload.base,
+        )
+        return CreatePullRequestOutput(
+            context=name,
+            number=None,
+            html_url=None,
+            title=payload.title,
+            draft=payload.draft,
+            dry_run=True,
+        )
+
+    token = await async_keychain_get(github.token_keychain)
+
+    _logger.info(
+        "create_github_pull_request",
+        context=name,
+        repository=payload.repository,
+        head=payload.head,
+        base=payload.base,
+    )
+
+    pr = await create_pull_request(
+        github.base_url,
+        token,
+        payload.repository,
+        head=payload.head,
+        base=payload.base,
+        title=payload.title,
+        body=payload.body,
+        draft=payload.draft,
+    )
+
+    return CreatePullRequestOutput(
+        context=name,
+        number=_int_or_none(pr.get("number")),
+        html_url=_string_or_none(pr.get("html_url")),
+        title=_string_or_none(pr.get("title")) or payload.title,
+        draft=_bool_or_none(pr.get("draft")),
+        dry_run=False,
     )
 
 

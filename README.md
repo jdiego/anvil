@@ -53,6 +53,7 @@ Current tools:
 - `compare_github_refs` — read-only, compares refs and returns compact commit/file counts.
 - `get_github_workflow_run_status` — read-only, returns workflow run metadata + jobs.
 - `get_github_actions_job_log` — read-only, fetches a truncated GitHub Actions job log tail.
+- `create_github_pull_request` — destructive, opens a GitHub PR after confirmation (dry-run otherwise).
 - `post_gitlab_mr_comment` — destructive, posts MR note/discussion after confirmation.
 - `post_gitlab_mr_line_comment` — destructive, posts an inline diff comment after confirmation.
 - `approve_gitlab_merge_request` — destructive, approves an MR after confirmation.
@@ -83,7 +84,7 @@ Each tool advertises MCP annotations (`title`, `readOnlyHint`, `destructiveHint`
 
 ### Tool surface and scaling
 
-anvil currently exposes ~29 tools — within the "one tool per action" range. The MCP tool list lands in the model's context window on every turn, so the surface is bounded deliberately. **Decision:** when a new upstream service would push the total past ~30 tools, switch from one-tool-per-action to a `search_actions` + `execute_action` pattern (optionally promoting the 3–5 most-used tools to dedicated entries) rather than adding more flat tools. Reference: the `build-mcp-server` skill (`mcp-server-dev` plugin), `references/tool-design.md`.
+anvil currently exposes ~30 tools — at the top of the "one tool per action" range. The MCP tool list lands in the model's context window on every turn, so the surface is bounded deliberately. **Decision:** the next upstream service (or a meaningful batch of new actions) should switch from one-tool-per-action to a `search_actions` + `execute_action` pattern (optionally promoting the 3–5 most-used tools to dedicated entries) rather than adding more flat tools. Reference: the `build-mcp-server` skill (`mcp-server-dev` plugin), `references/tool-design.md`.
 
 ## Project Structure
 

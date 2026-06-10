@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from httpx import Response
 
 from anvil.github.models import (
     CompareRefsInput,
+    CreatePullRequestInput,
     GetActionsJobLogInput,
     GetPullRequestDiffInput,
     GetWorkflowRunStatusInput,
@@ -18,6 +20,7 @@ from anvil.github.models import (
 )
 from anvil.github.tools import (
     compare_github_refs,
+    create_github_pull_request,
     get_github_actions_job_log,
     get_github_pull_request_diff,
     get_github_workflow_run_status,
@@ -318,3 +321,70 @@ async def test_get_github_actions_job_log_returns_tail(
     assert output.log_tail == "line2\nline3"
     assert output.returned_lines == 2
     assert output.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_create_github_pull_request_dry_run_does_not_call_github(
+    github_contexts_yaml: Path,
+    github_env_secret: None,
+) -> None:
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post("https://api.github.com/repos/owner/repo/pulls")
+
+        output = await create_github_pull_request(
+            CreatePullRequestInput(
+                context_url="https://api.github.com/repos/owner/repo",
+                repository="owner/repo",
+                head="fix/sentry-42",
+                title="fix: handle missing payload field",
+            )
+        )
+
+    assert output.dry_run is True
+    assert output.number is None
+    assert output.html_url is None
+    assert output.title == "fix: handle missing payload field"
+    assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_create_github_pull_request_creates_pr_when_confirmed(
+    github_contexts_yaml: Path,
+    github_env_secret: None,
+) -> None:
+    route = respx.post("https://api.github.com/repos/owner/repo/pulls").mock(
+        return_value=Response(
+            201,
+            json={
+                "number": 42,
+                "title": "fix: handle missing payload field",
+                "html_url": "https://github.com/owner/repo/pull/42",
+                "draft": False,
+            },
+        )
+    )
+
+    output = await create_github_pull_request(
+        CreatePullRequestInput(
+            context_url="https://api.github.com/repos/owner/repo",
+            repository="owner/repo",
+            head="fix/sentry-42",
+            base="main",
+            title="fix: handle missing payload field",
+            body="Root cause, fix, and test plan.",
+            confirm=True,
+        )
+    )
+
+    assert output.dry_run is False
+    assert output.number == 42
+    assert str(output.html_url) == "https://github.com/owner/repo/pull/42"
+    assert output.title == "fix: handle missing payload field"
+
+    sent = json.loads(route.calls.last.request.content)
+    assert sent["head"] == "fix/sentry-42"
+    assert sent["base"] == "main"
+    assert sent["title"] == "fix: handle missing payload field"
+    assert sent["draft"] is False
+    assert route.calls.last.request.headers["Authorization"] == "Bearer github-token"

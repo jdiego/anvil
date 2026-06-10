@@ -5,6 +5,7 @@ from fastmcp import FastMCP
 from anvil.doctor import doctor_report
 from anvil.github.tools import (
     compare_github_refs,
+    create_github_pull_request,
     get_github_actions_job_log,
     get_github_pull_request_diff,
     get_github_workflow_run_status,
@@ -101,6 +102,7 @@ def build_server() -> FastMCP:
 
     # Destructive tools — mutate upstream state, gated behind a confirm flag.
     destructive_tools = (
+        (create_github_pull_request, "Create GitHub Pull Request"),
         (create_gitlab_merge_request, "Create GitLab Merge Request"),
         (retry_gitlab_failed_jobs, "Retry GitLab Failed Jobs"),
         (cancel_gitlab_pipeline, "Cancel GitLab Pipeline"),
