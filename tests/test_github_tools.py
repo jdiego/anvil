@@ -8,6 +8,7 @@ import pytest
 import respx
 import yaml
 from httpx import Response
+from pydantic import ValidationError
 
 from anvil.github.models import (
     CompareRefsInput,
@@ -18,6 +19,7 @@ from anvil.github.models import (
     GetWorkflowRunStatusInput,
     ListPullRequestsInput,
     ResolveGitHubContextInput,
+    UpdatePullRequestInput,
 )
 from anvil.github.tools import (
     compare_github_refs,
@@ -28,6 +30,7 @@ from anvil.github.tools import (
     get_github_workflow_run_status,
     list_github_pull_requests,
     resolve_github_context,
+    update_github_pull_request,
 )
 
 
@@ -495,3 +498,76 @@ async def test_get_github_pull_request_skips_comments_when_max_zero(
     assert output.review_decision == "approved"
     assert output.comments == []
     assert not comments_route.called
+
+
+def test_update_github_pull_request_requires_title_or_body() -> None:
+    with pytest.raises(ValidationError):
+        UpdatePullRequestInput(
+            context_url="https://api.github.com/repos/owner/repo",
+            repository="owner/repo",
+            pull_number=42,
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_github_pull_request_dry_run_does_not_call_github(
+    github_contexts_yaml: Path,
+    github_env_secret: None,
+) -> None:
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.patch("https://api.github.com/repos/owner/repo/pulls/42")
+
+        output = await update_github_pull_request(
+            UpdatePullRequestInput(
+                context_url="https://api.github.com/repos/owner/repo",
+                repository="owner/repo",
+                pull_number=42,
+                body="Updated description.",
+            )
+        )
+
+    assert output.dry_run is True
+    assert output.number == 42
+    assert output.html_url is None
+    assert output.updated_fields == ["body"]
+    assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_update_github_pull_request_updates_when_confirmed(
+    github_contexts_yaml: Path,
+    github_env_secret: None,
+) -> None:
+    route = respx.patch("https://api.github.com/repos/owner/repo/pulls/42").mock(
+        return_value=Response(
+            200,
+            json={
+                "number": 42,
+                "title": "fix: clearer title",
+                "html_url": "https://github.com/owner/repo/pull/42",
+            },
+        )
+    )
+
+    output = await update_github_pull_request(
+        UpdatePullRequestInput(
+            context_url="https://api.github.com/repos/owner/repo",
+            repository="owner/repo",
+            pull_number=42,
+            title="fix: clearer title",
+            body="Updated rationale and test plan.",
+            confirm=True,
+        )
+    )
+
+    assert output.dry_run is False
+    assert output.number == 42
+    assert output.title == "fix: clearer title"
+    assert str(output.html_url) == "https://github.com/owner/repo/pull/42"
+    assert output.updated_fields == ["body", "title"]
+
+    sent = json.loads(route.calls.last.request.content)
+    assert sent == {"title": "fix: clearer title", "body": "Updated rationale and test plan."}
+    assert route.calls.last.request.method == "PATCH"
+    assert route.calls.last.request.headers["Authorization"] == "Bearer github-token"

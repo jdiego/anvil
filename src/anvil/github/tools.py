@@ -14,6 +14,7 @@ from anvil.github.client import (
     list_pull_request_reviews,
     list_pull_requests,
     list_workflow_run_jobs,
+    update_pull_request,
 )
 from anvil.github.client import (
     get_actions_job_log as fetch_actions_job_log,
@@ -41,6 +42,8 @@ from anvil.github.models import (
     PullRequestSummary,
     ResolveGitHubContextInput,
     ResolveGitHubContextOutput,
+    UpdatePullRequestInput,
+    UpdatePullRequestOutput,
 )
 from anvil.keychain import async_keychain_get
 from anvil.logging import get_logger
@@ -231,6 +234,96 @@ async def create_github_pull_request(
         html_url=_string_or_none(pr.get("html_url")),
         title=_string_or_none(pr.get("title")) or payload.title,
         draft=_bool_or_none(pr.get("draft")),
+        dry_run=False,
+    )
+
+
+async def update_github_pull_request(
+    payload: UpdatePullRequestInput,
+) -> UpdatePullRequestOutput:
+    """Update the title and/or description of an existing GitHub pull request.
+
+    Use when:
+      - The user asks to edit a PR's description (body) or rename its title.
+      - You have the pull request number and the new text to apply.
+
+    Do not use when:
+      - You need to change PR state (open/close, draft/ready) or merge it;
+        this tool only edits the title and body text.
+      - You want to add a comment instead of replacing the body.
+      - The user has not confirmed the edit.
+
+    Input example:
+      {
+        "context_url": "https://api.github.com/repos/owner/repo",
+        "repository": "owner/repo",
+        "pull_number": 42,
+        "body": "Updated rationale, screenshots, and test plan.",
+        "confirm": false
+      }
+
+    Returns:
+      A compact PR summary: context, number, title, html_url, updated_fields,
+      and dry_run. When confirm=false, no upstream call is made and the title
+      and html_url are null.
+
+    Side effects:
+      Destructive when confirm=true: replaces the PR title and/or body in full,
+      visible to other users. It does not change review or merge state.
+    """
+
+    context_url = str(payload.context_url)
+    name, ctx = resolve_context(context_url)
+    github = _github_service(name, ctx)
+
+    body_payload: dict[str, Any] = {}
+    if payload.title is not None:
+        body_payload["title"] = payload.title
+    if payload.body is not None:
+        body_payload["body"] = payload.body
+    updated_fields = sorted(body_payload)
+
+    if not payload.confirm:
+        _logger.info(
+            "update_github_pull_request_dry_run",
+            context=name,
+            repository=payload.repository,
+            pull_number=payload.pull_number,
+            updated_fields=updated_fields,
+        )
+        return UpdatePullRequestOutput(
+            context=name,
+            number=payload.pull_number,
+            title=payload.title,
+            html_url=None,
+            updated_fields=updated_fields,
+            dry_run=True,
+        )
+
+    token = await async_keychain_get(github.token_keychain)
+
+    _logger.info(
+        "update_github_pull_request",
+        context=name,
+        repository=payload.repository,
+        pull_number=payload.pull_number,
+        updated_fields=updated_fields,
+    )
+
+    pr = await update_pull_request(
+        github.base_url,
+        token,
+        payload.repository,
+        payload.pull_number,
+        body_payload,
+    )
+
+    return UpdatePullRequestOutput(
+        context=name,
+        number=_int_or_none(pr.get("number")) or payload.pull_number,
+        title=_string_or_none(pr.get("title")) or payload.title,
+        html_url=_string_or_none(pr.get("html_url")),
+        updated_fields=updated_fields,
         dry_run=False,
     )
 

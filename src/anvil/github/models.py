@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, model_validator
 
 
 class GitHubRepositoryInput(BaseModel):
@@ -171,6 +171,51 @@ class GetPullRequestOutput(BaseModel):
         default=False, description="True when more comments exist than were returned."
     )
     warnings: list[str] = Field(default_factory=list)
+
+
+class UpdatePullRequestInput(GitHubRepositoryInput):
+    pull_number: int = Field(ge=1, description="GitHub pull request number to update.")
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="New title. Leave unset to keep the current title.",
+    )
+    body: str | None = Field(
+        default=None,
+        description=(
+            "New Markdown description. Replaces the current body in full. "
+            "Leave unset to keep the current body."
+        ),
+    )
+    confirm: bool = Field(
+        default=False,
+        description=(
+            "Safety flag. The PR is only updated when this is true. "
+            "When false, the tool returns a dry-run preview of what would be sent."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def require_title_or_body(self) -> Self:
+        if self.title is None and self.body is None:
+            raise ValueError("Provide title, body, or both.")
+        return self
+
+
+class UpdatePullRequestOutput(BaseModel):
+    context: str
+    number: int
+    title: str | None = None
+    html_url: HttpUrl | None = None
+    updated_fields: list[str] = Field(
+        default_factory=list,
+        description="Field names that would be / were sent to GitHub (e.g. ['title', 'body']).",
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="True when the caller did not set confirm=True; no PR was updated.",
+    )
 
 
 class CompareRefsInput(GitHubRepositoryInput):

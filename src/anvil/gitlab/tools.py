@@ -64,6 +64,8 @@ from anvil.gitlab.models import (
     SetMergeRequestReadyOutput,
     TriggerPipelineInput,
     TriggerPipelineOutput,
+    UpdateMergeRequestInput,
+    UpdateMergeRequestOutput,
 )
 from anvil.keychain import async_keychain_get
 from anvil.logging import get_logger
@@ -737,6 +739,96 @@ async def set_gitlab_mr_ready(
         title=str(mr["title"]) if mr.get("title") is not None else None,
         draft=bool(mr["draft"]) if mr.get("draft") is not None else None,
         web_url=mr.get("web_url") if isinstance(mr.get("web_url"), str) else None,
+        dry_run=False,
+    )
+
+
+async def update_gitlab_merge_request(
+    payload: UpdateMergeRequestInput,
+) -> UpdateMergeRequestOutput:
+    """Update the title and/or description of an existing GitLab merge request.
+
+    Use when:
+      - The user asks to edit an MR's description or rename its title.
+      - You have the MR iid and the new text to apply.
+
+    Do not use when:
+      - You need to change MR state (close/reopen, draft/ready) or merge it;
+        use set_gitlab_mr_ready or a dedicated tool. This edits text only.
+      - You want to add a comment instead of replacing the description.
+      - The user has not confirmed the edit.
+
+    Input example:
+      {
+        "context_url": "https://gitlab.example.com/group/project",
+        "project_path": "group/project",
+        "mr_iid": 7,
+        "description": "Updated rationale, screenshots, and test plan.",
+        "confirm": false
+      }
+
+    Returns:
+      A compact MR summary: context, iid, title, web_url, updated_fields, and
+      dry_run. When confirm=false, no upstream call is made and title/web_url
+      are null.
+
+    Side effects:
+      Destructive when confirm=true: replaces the MR title and/or description in
+      full, visible to other users. It does not change review or merge state.
+    """
+
+    context_url = str(payload.context_url)
+    name, ctx = resolve_context(context_url)
+    gitlab = _gitlab_service(name, ctx)
+
+    update_payload: dict[str, Any] = {}
+    if payload.title is not None:
+        update_payload["title"] = payload.title
+    if payload.description is not None:
+        update_payload["description"] = payload.description
+    updated_fields = sorted(update_payload)
+
+    if not payload.confirm:
+        _logger.info(
+            "update_gitlab_merge_request_dry_run",
+            context=name,
+            project_path=payload.project_path,
+            mr_iid=payload.mr_iid,
+            updated_fields=updated_fields,
+        )
+        return UpdateMergeRequestOutput(
+            context=name,
+            iid=payload.mr_iid,
+            title=payload.title,
+            web_url=None,
+            updated_fields=updated_fields,
+            dry_run=True,
+        )
+
+    token = await async_keychain_get(gitlab.token_keychain)
+
+    _logger.info(
+        "update_gitlab_merge_request",
+        context=name,
+        project_path=payload.project_path,
+        mr_iid=payload.mr_iid,
+        updated_fields=updated_fields,
+    )
+
+    mr = await update_merge_request(
+        gitlab.base_url,
+        token,
+        payload.project_path,
+        payload.mr_iid,
+        update_payload,
+    )
+
+    return UpdateMergeRequestOutput(
+        context=name,
+        iid=int(mr["iid"]) if mr.get("iid") is not None else payload.mr_iid,
+        title=str(mr["title"]) if mr.get("title") is not None else payload.title,
+        web_url=mr.get("web_url") if isinstance(mr.get("web_url"), str) else None,
+        updated_fields=updated_fields,
         dry_run=False,
     )
 

@@ -108,6 +108,53 @@ class GetMergeRequestOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class UpdateMergeRequestInput(GitLabProjectInput):
+    mr_iid: int = Field(description="GitLab MR iid (project-scoped, not the global id).")
+    title: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=255,
+        description="New title. Leave unset to keep the current title.",
+    )
+    description: str | None = Field(
+        default=None,
+        description=(
+            "New Markdown description. Replaces the current description in full. "
+            "Leave unset to keep the current description."
+        ),
+    )
+    confirm: bool = Field(
+        default=False,
+        description=(
+            "Safety flag. The MR is only updated when this is true. "
+            "When false, the tool returns a dry-run preview of what would be sent."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def require_title_or_description(self) -> Self:
+        if self.title is None and self.description is None:
+            raise ValueError("Provide title, description, or both.")
+        return self
+
+
+class UpdateMergeRequestOutput(BaseModel):
+    context: str
+    iid: int
+    title: str | None = None
+    web_url: HttpUrl | None = None
+    updated_fields: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Field names that would be / were sent to GitLab, e.g. ['description', 'title']."
+        ),
+    )
+    dry_run: bool = Field(
+        default=False,
+        description="True when the caller did not set confirm=True; no MR was updated.",
+    )
+
+
 class GitLabJobSummary(BaseModel):
     id: int
     name: str
