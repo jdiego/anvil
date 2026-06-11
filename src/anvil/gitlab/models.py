@@ -47,6 +47,67 @@ class CreateMergeRequestOutput(BaseModel):
     )
 
 
+class GetMergeRequestInput(GitLabProjectInput):
+    mr_iid: int = Field(description="GitLab MR iid (project-scoped, not the global id).")
+    max_notes: int = Field(
+        default=20,
+        ge=0,
+        le=100,
+        description=(
+            "Maximum recent non-system discussion notes to include. "
+            "Set 0 to skip notes and only return approval/merge status."
+        ),
+    )
+
+
+class MergeRequestNote(BaseModel):
+    id: int
+    author_username: str | None = None
+    body: str
+    resolvable: bool = False
+    resolved: bool = False
+    created_at: str | None = None
+    web_url: HttpUrl | None = None
+
+
+class GetMergeRequestOutput(BaseModel):
+    context: str
+    iid: int
+    title: str | None = None
+    state: str | None = None
+    draft: bool | None = None
+    author_username: str | None = None
+    source_branch: str | None = None
+    target_branch: str | None = None
+    web_url: HttpUrl | None = None
+    merge_status: str | None = Field(
+        default=None,
+        description="GitLab merge_status, e.g. 'can_be_merged' or 'cannot_be_merged'.",
+    )
+    detailed_merge_status: str | None = Field(
+        default=None,
+        description="GitLab detailed_merge_status when available, e.g. 'mergeable', 'ci_still_running'.",  # noqa: E501
+    )
+    has_conflicts: bool | None = None
+    blocking_discussions_resolved: bool | None = None
+    approved: bool | None = Field(
+        default=None,
+        description="True when the MR has met its approval rules. Null if approvals are unavailable.",  # noqa: E501
+    )
+    approvals_required: int | None = None
+    approvals_left: int | None = None
+    approved_by: list[str] = Field(default_factory=list)
+    total_threads: int = Field(default=0, description="Count of discussion threads (non-system).")
+    unresolved_threads: int = Field(
+        default=0, description="Count of resolvable threads not yet resolved."
+    )
+    notes: list[MergeRequestNote] = Field(default_factory=list)
+    notes_truncated: bool = Field(
+        default=False, description="True when more notes exist than were returned."
+    )
+    warnings: list[str] = Field(default_factory=list)
+
+
 class GitLabJobSummary(BaseModel):
     id: int
     name: str

@@ -14,6 +14,7 @@ from anvil.github.models import (
     CreatePullRequestInput,
     GetActionsJobLogInput,
     GetPullRequestDiffInput,
+    GetPullRequestInput,
     GetWorkflowRunStatusInput,
     ListPullRequestsInput,
     ResolveGitHubContextInput,
@@ -22,6 +23,7 @@ from anvil.github.tools import (
     compare_github_refs,
     create_github_pull_request,
     get_github_actions_job_log,
+    get_github_pull_request,
     get_github_pull_request_diff,
     get_github_workflow_run_status,
     list_github_pull_requests,
@@ -390,3 +392,106 @@ async def test_create_github_pull_request_creates_pr_when_confirmed(
     assert sent["title"] == "fix: handle missing payload field"
     assert sent["draft"] is False
     assert route.calls.last.request.headers["Authorization"] == "Bearer github-token"
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_github_pull_request_summarizes_reviews_and_comments(
+    github_contexts_yaml: Path,
+    github_env_secret: None,
+) -> None:
+    respx.get("https://api.github.com/repos/owner/repo/pulls/7").mock(
+        return_value=Response(
+            200,
+            json={
+                "number": 7,
+                "title": "feat: add github tools",
+                "state": "open",
+                "draft": False,
+                "merged": False,
+                "user": {"login": "author"},
+                "head": {"ref": "feat/github"},
+                "base": {"ref": "main"},
+                "html_url": "https://github.com/owner/repo/pull/7",
+                "mergeable": True,
+                "mergeable_state": "clean",
+                "requested_reviewers": [{"login": "carol"}],
+            },
+        )
+    )
+    respx.get("https://api.github.com/repos/owner/repo/pulls/7/reviews").mock(
+        return_value=Response(
+            200,
+            json=[
+                {"user": {"login": "bob"}, "state": "CHANGES_REQUESTED", "submitted_at": "t1"},
+                {"user": {"login": "bob"}, "state": "APPROVED", "submitted_at": "t2"},
+                {"user": {"login": "dave"}, "state": "COMMENTED", "submitted_at": "t3"},
+            ],
+        )
+    )
+    respx.get("https://api.github.com/repos/owner/repo/issues/7/comments").mock(
+        return_value=Response(
+            200,
+            json=[
+                {"id": 1, "user": {"login": "bob"}, "body": "old", "created_at": "t1"},
+                {"id": 2, "user": {"login": "carol"}, "body": "newer", "created_at": "t2"},
+            ],
+        )
+    )
+
+    output = await get_github_pull_request(
+        GetPullRequestInput(
+            context_url="https://api.github.com/repos/owner/repo",
+            repository="owner/repo",
+            pull_number=7,
+            max_comments=1,
+        )
+    )
+
+    assert output.number == 7
+    assert output.mergeable_state == "clean"
+    # bob's later APPROVED overrides the earlier CHANGES_REQUESTED; dave (COMMENTED) is dropped.
+    assert output.approved_by == ["bob"]
+    assert output.changes_requested_by == []
+    assert {r.user_login for r in output.reviews} == {"bob"}
+    # An outstanding requested reviewer keeps the decision at review_required.
+    assert output.requested_reviewers == ["carol"]
+    assert output.review_decision == "review_required"
+    assert output.total_comments == 2
+    assert output.comments_truncated is True
+    assert [c.id for c in output.comments] == [2]
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_github_pull_request_skips_comments_when_max_zero(
+    github_contexts_yaml: Path,
+    github_env_secret: None,
+) -> None:
+    respx.get("https://api.github.com/repos/owner/repo/pulls/7").mock(
+        return_value=Response(
+            200,
+            json={"number": 7, "state": "open", "requested_reviewers": []},
+        )
+    )
+    respx.get("https://api.github.com/repos/owner/repo/pulls/7/reviews").mock(
+        return_value=Response(
+            200,
+            json=[{"user": {"login": "bob"}, "state": "APPROVED", "submitted_at": "t1"}],
+        )
+    )
+    comments_route = respx.get("https://api.github.com/repos/owner/repo/issues/7/comments")
+
+    output = await get_github_pull_request(
+        GetPullRequestInput(
+            context_url="https://api.github.com/repos/owner/repo",
+            repository="owner/repo",
+            pull_number=7,
+            max_comments=0,
+        )
+    )
+
+    assert output.approved_by == ["bob"]
+    assert output.review_decision == "approved"
+    assert output.comments == []
+    assert not comments_route.called

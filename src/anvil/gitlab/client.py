@@ -184,6 +184,66 @@ async def compare_refs(
     return result  # type: ignore[no-any-return]
 
 
+async def get_merge_request(
+    base_url: str,
+    token: str,
+    project_path: str,
+    mr_iid: int,
+) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "GET",
+            f"{_api_root(base_url)}/projects/{_encode_project(project_path)}/merge_requests/{mr_iid}",
+            service=SERVICE,
+            headers=gitlab_headers(token),
+        )
+    return result  # type: ignore[no-any-return]
+
+
+async def get_merge_request_approvals(
+    base_url: str,
+    token: str,
+    project_path: str,
+    mr_iid: int,
+) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "GET",
+            (
+                f"{_api_root(base_url)}/projects/{_encode_project(project_path)}"
+                f"/merge_requests/{mr_iid}/approvals"
+            ),
+            service=SERVICE,
+            headers=gitlab_headers(token),
+        )
+    return result  # type: ignore[no-any-return]
+
+
+async def list_merge_request_discussions(
+    base_url: str,
+    token: str,
+    project_path: str,
+    mr_iid: int,
+    *,
+    per_page: int = 100,
+) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "GET",
+            (
+                f"{_api_root(base_url)}/projects/{_encode_project(project_path)}"
+                f"/merge_requests/{mr_iid}/discussions"
+            ),
+            service=SERVICE,
+            headers=gitlab_headers(token),
+            params={"per_page": per_page},
+        )
+    return result if isinstance(result, list) else []
+
+
 async def get_merge_request_changes(
     base_url: str,
     token: str,

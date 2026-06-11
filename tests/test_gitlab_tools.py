@@ -16,6 +16,7 @@ from anvil.gitlab.models import (
     DiagnosePipelineFailureInput,
     GetJobLogInput,
     GetMergeRequestDiffInput,
+    GetMergeRequestInput,
     GetPipelineStatusInput,
     ListMergeRequestsInput,
     PostMergeRequestCommentInput,
@@ -31,6 +32,7 @@ from anvil.gitlab.tools import (
     create_gitlab_merge_request,
     diagnose_gitlab_pipeline_failure,
     get_gitlab_job_log,
+    get_gitlab_merge_request,
     get_gitlab_mr_diff,
     get_gitlab_pipeline_status,
     list_gitlab_merge_requests,
@@ -878,3 +880,142 @@ async def test_trigger_pipeline_confirmed_posts_pipeline(
     assert result.pipeline is not None
     assert result.pipeline.id == 321
     assert b'"variables":[{"key":"RUN_SLOW","value":"1"}]' in route.calls.last.request.content
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_gitlab_merge_request_consolidates_status(
+    fake_contexts_yaml: Path,
+    env_secrets: None,
+) -> None:
+    base = "https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"
+    respx.get(base).mock(
+        return_value=Response(
+            200,
+            json={
+                "iid": 7,
+                "title": "feat: x",
+                "state": "opened",
+                "draft": False,
+                "author": {"username": "alice"},
+                "source_branch": "feat/x",
+                "target_branch": "main",
+                "web_url": "https://gitlab.example.com/group/project/-/merge_requests/7",
+                "merge_status": "can_be_merged",
+                "detailed_merge_status": "mergeable",
+                "has_conflicts": False,
+                "blocking_discussions_resolved": False,
+            },
+        )
+    )
+    respx.get(f"{base}/approvals").mock(
+        return_value=Response(
+            200,
+            json={
+                "approved": False,
+                "approvals_required": 2,
+                "approvals_left": 1,
+                "approved_by": [{"user": {"username": "bob"}}],
+            },
+        )
+    )
+    respx.get(f"{base}/discussions").mock(
+        return_value=Response(
+            200,
+            json=[
+                {
+                    "id": "d1",
+                    "notes": [
+                        {
+                            "id": 11,
+                            "system": False,
+                            "resolvable": True,
+                            "resolved": False,
+                            "author": {"username": "bob"},
+                            "body": "please fix",
+                            "created_at": "t1",
+                        }
+                    ],
+                },
+                {
+                    "id": "d2",
+                    "notes": [
+                        {"id": 12, "system": True, "body": "changed the description"},
+                    ],
+                },
+            ],
+        )
+    )
+
+    result = await get_gitlab_merge_request(
+        GetMergeRequestInput(
+            context_url="https://gitlab.example.com/group/project",
+            project_path="group/project",
+            mr_iid=7,
+        )
+    )
+
+    assert result.iid == 7
+    assert result.merge_status == "can_be_merged"
+    assert result.approved is False
+    assert result.approvals_left == 1
+    assert result.approved_by == ["bob"]
+    # Only the human discussion counts as a thread; the system note is ignored.
+    assert result.total_threads == 1
+    assert result.unresolved_threads == 1
+    assert [n.id for n in result.notes] == [11]
+    assert result.notes[0].resolved is False
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_get_gitlab_merge_request_degrades_when_approvals_unavailable(
+    fake_contexts_yaml: Path,
+    env_secrets: None,
+) -> None:
+    base = "https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"
+    respx.get(base).mock(
+        return_value=Response(200, json={"iid": 7, "state": "opened", "title": "feat: x"})
+    )
+    respx.get(f"{base}/approvals").mock(return_value=Response(404, json={"message": "404"}))
+
+    result = await get_gitlab_merge_request(
+        GetMergeRequestInput(
+            context_url="https://gitlab.example.com/group/project",
+            project_path="group/project",
+            mr_iid=7,
+            max_notes=0,
+        )
+    )
+
+    assert result.approved is None
+    assert result.approvals_left is None
+    assert result.approved_by == []
+    assert any("Approval status unavailable" in w for w in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_get_gitlab_merge_request_skips_discussions_when_max_notes_zero(
+    fake_contexts_yaml: Path,
+    env_secrets: None,
+) -> None:
+    base = "https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(base).mock(return_value=Response(200, json={"iid": 7, "state": "opened"}))
+        mock.get(f"{base}/approvals").mock(
+            return_value=Response(200, json={"approved": True, "approvals_left": 0})
+        )
+        discussions_route = mock.get(f"{base}/discussions")
+
+        result = await get_gitlab_merge_request(
+            GetMergeRequestInput(
+                context_url="https://gitlab.example.com/group/project",
+                project_path="group/project",
+                mr_iid=7,
+                max_notes=0,
+            )
+        )
+
+    assert result.approved is True
+    assert result.notes == []
+    assert not discussions_route.called

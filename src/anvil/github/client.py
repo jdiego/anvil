@@ -95,6 +95,42 @@ async def get_pull_request(
     return result  # type: ignore[no-any-return]
 
 
+async def list_pull_request_reviews(
+    base_url: str,
+    token: str,
+    repository: str,
+    pull_number: int,
+) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "GET",
+            f"{_api_root(base_url)}/repos/{_repo_path(repository)}/pulls/{pull_number}/reviews",
+            service=SERVICE,
+            headers=github_headers(token),
+            params={"per_page": 100},
+        )
+    return result if isinstance(result, list) else []
+
+
+async def list_issue_comments(
+    base_url: str,
+    token: str,
+    repository: str,
+    issue_number: int,
+) -> list[dict[str, Any]]:
+    async with httpx.AsyncClient(timeout=DEFAULT_TIMEOUT) as client:
+        result = await request_json(
+            client,
+            "GET",
+            f"{_api_root(base_url)}/repos/{_repo_path(repository)}/issues/{issue_number}/comments",
+            service=SERVICE,
+            headers=github_headers(token),
+            params={"per_page": 100},
+        )
+    return result if isinstance(result, list) else []
+
+
 async def create_pull_request(
     base_url: str,
     token: str,

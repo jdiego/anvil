@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 from anvil.contexts import Context, ServiceContext, resolve_context
-from anvil.exceptions import ContextNotFoundError
+from anvil.exceptions import ContextNotFoundError, UpstreamHTTPError
 from anvil.gitlab.client import (
     approve_merge_request,
     cancel_pipeline,
@@ -12,8 +12,11 @@ from anvil.gitlab.client import (
     create_merge_request,
     get_job_trace,
     get_latest_pipeline_for_ref,
+    get_merge_request,
+    get_merge_request_approvals,
     get_merge_request_changes,
     get_pipeline,
+    list_merge_request_discussions,
     list_merge_requests,
     list_pipeline_jobs,
     post_merge_request_discussion,
@@ -39,6 +42,8 @@ from anvil.gitlab.models import (
     GetJobLogOutput,
     GetMergeRequestDiffInput,
     GetMergeRequestDiffOutput,
+    GetMergeRequestInput,
+    GetMergeRequestOutput,
     GetPipelineStatusInput,
     GetPipelineStatusOutput,
     GitLabJobSummary,
@@ -46,6 +51,7 @@ from anvil.gitlab.models import (
     ListMergeRequestsInput,
     ListMergeRequestsOutput,
     MergeRequestFileDiff,
+    MergeRequestNote,
     MergeRequestPosition,
     MergeRequestSummary,
     PostMergeRequestCommentInput,
@@ -1007,6 +1013,101 @@ async def get_gitlab_mr_diff(payload: GetMergeRequestDiffInput) -> GetMergeReque
     )
 
 
+async def get_gitlab_merge_request(payload: GetMergeRequestInput) -> GetMergeRequestOutput:
+    """Return consolidated GitLab merge request status for following up on review.
+
+    Use when:
+      - You need an MR's review state in one call: approvals, mergeability, and
+        whether discussion threads are still unresolved.
+      - You want to read recent (non-system) discussion notes to follow up on
+        reviewer feedback.
+
+    Do not use when:
+      - You need the code diff; use get_gitlab_mr_diff instead.
+      - You only need to discover which MRs exist; use list_gitlab_merge_requests.
+
+    Input example:
+      {
+        "context_url": "https://gitlab.example.com/group/project",
+        "project_path": "group/project",
+        "mr_iid": 7,
+        "max_notes": 20
+      }
+
+    Returns:
+      MR metadata, merge/approval status, thread counts, and up to `max_notes`
+      recent notes. `approved` and approval counts are null (with a warning)
+      when the approvals API is unavailable for the project.
+
+    Side effects:
+      Read-only. Performs authenticated GET requests to GitLab.
+    """
+
+    context_url = str(payload.context_url)
+    name, ctx = resolve_context(context_url)
+    gitlab = _gitlab_service(name, ctx)
+    token = await async_keychain_get(gitlab.token_keychain)
+
+    warnings: list[str] = []
+
+    mr = await get_merge_request(gitlab.base_url, token, payload.project_path, payload.mr_iid)
+
+    approvals: dict[str, Any] = {}
+    try:
+        approvals = await get_merge_request_approvals(
+            gitlab.base_url, token, payload.project_path, payload.mr_iid
+        )
+    except UpstreamHTTPError as exc:
+        warnings.append(f"Approval status unavailable: {exc}")
+
+    discussions: list[dict[str, Any]] = []
+    if payload.max_notes > 0:
+        discussions = await list_merge_request_discussions(
+            gitlab.base_url, token, payload.project_path, payload.mr_iid
+        )
+
+    author = mr.get("author")
+    author_username = author.get("username") if isinstance(author, dict) else None
+
+    total_threads, unresolved_threads, all_notes = _summarize_discussions(discussions)
+    notes_truncated = len(all_notes) > payload.max_notes
+    notes = all_notes[-payload.max_notes :] if payload.max_notes else []
+
+    _logger.info(
+        "get_gitlab_merge_request",
+        context=name,
+        project_path=payload.project_path,
+        mr_iid=payload.mr_iid,
+        unresolved_threads=unresolved_threads,
+        approvals_left=_int_or_none(approvals.get("approvals_left")),
+    )
+
+    return GetMergeRequestOutput(
+        context=name,
+        iid=int(mr["iid"]) if mr.get("iid") is not None else payload.mr_iid,
+        title=_str_or_none(mr.get("title")),
+        state=_str_or_none(mr.get("state")),
+        draft=_bool_or_none(mr.get("draft")),
+        author_username=_str_or_none(author_username),
+        source_branch=_str_or_none(mr.get("source_branch")),
+        target_branch=_str_or_none(mr.get("target_branch")),
+        web_url=mr.get("web_url") if isinstance(mr.get("web_url"), str) else None,
+        merge_status=_str_or_none(mr.get("merge_status")),
+        detailed_merge_status=_str_or_none(mr.get("detailed_merge_status")),
+        has_conflicts=_bool_or_none(mr.get("has_conflicts")),
+        blocking_discussions_resolved=_bool_or_none(mr.get("blocking_discussions_resolved")),
+        approved=_bool_or_none(approvals.get("approved")) if approvals else None,
+        approvals_required=_int_or_none(approvals.get("approvals_required")),
+        approvals_left=_int_or_none(approvals.get("approvals_left")),
+        approved_by=_approver_usernames(approvals),
+        total_threads=total_threads,
+        unresolved_threads=unresolved_threads,
+        notes=notes,
+        notes_truncated=notes_truncated,
+        warnings=warnings,
+    )
+
+
 async def create_gitlab_merge_request(
     payload: CreateMergeRequestInput,
 ) -> CreateMergeRequestOutput:
@@ -1118,6 +1219,65 @@ def _mr_summary(mr: dict[str, Any]) -> MergeRequestSummary:
         web_url=mr.get("web_url") if isinstance(mr.get("web_url"), str) else None,
         updated_at=str(mr["updated_at"]) if mr.get("updated_at") is not None else None,
     )
+
+
+def _str_or_none(value: object) -> str | None:
+    return str(value) if isinstance(value, str) else None
+
+
+def _bool_or_none(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _approver_usernames(approvals: dict[str, Any]) -> list[str]:
+    approved_by = approvals.get("approved_by")
+    if not isinstance(approved_by, list):
+        return []
+    usernames: list[str] = []
+    for entry in approved_by:
+        user = entry.get("user") if isinstance(entry, dict) else None
+        username = user.get("username") if isinstance(user, dict) else None
+        if isinstance(username, str):
+            usernames.append(username)
+    return usernames
+
+
+def _summarize_discussions(
+    discussions: list[dict[str, Any]],
+) -> tuple[int, int, list[MergeRequestNote]]:
+    """Return (total_threads, unresolved_threads, ordered non-system notes)."""
+
+    total_threads = 0
+    unresolved_threads = 0
+    notes: list[MergeRequestNote] = []
+    for discussion in discussions:
+        raw_notes = discussion.get("notes")
+        if not isinstance(raw_notes, list):
+            continue
+        human_notes = [n for n in raw_notes if isinstance(n, dict) and not n.get("system")]
+        if not human_notes:
+            continue
+        total_threads += 1
+        if any(n.get("resolvable") and not n.get("resolved") for n in human_notes):
+            unresolved_threads += 1
+        for note in human_notes:
+            author = note.get("author")
+            username = author.get("username") if isinstance(author, dict) else None
+            notes.append(
+                MergeRequestNote(
+                    id=int(note["id"]),
+                    author_username=_str_or_none(username),
+                    body=str(note.get("body") or ""),
+                    resolvable=bool(note.get("resolvable")),
+                    resolved=bool(note.get("resolved")),
+                    created_at=_str_or_none(note.get("created_at")),
+                )
+            )
+    return total_threads, unresolved_threads, notes
 
 
 def _mr_file_diff(change: dict[str, Any], max_lines: int) -> MergeRequestFileDiff:

@@ -9,7 +9,9 @@ from anvil.github.client import (
     create_pull_request,
     get_pull_request,
     get_workflow_run,
+    list_issue_comments,
     list_pull_request_files,
+    list_pull_request_reviews,
     list_pull_requests,
     list_workflow_run_jobs,
 )
@@ -25,13 +27,17 @@ from anvil.github.models import (
     GetActionsJobLogOutput,
     GetPullRequestDiffInput,
     GetPullRequestDiffOutput,
+    GetPullRequestInput,
+    GetPullRequestOutput,
     GetWorkflowRunStatusInput,
     GetWorkflowRunStatusOutput,
     GitHubActionsJobSummary,
     GitHubWorkflowRunSummary,
     ListPullRequestsInput,
     ListPullRequestsOutput,
+    PullRequestComment,
     PullRequestFileDiff,
+    PullRequestReview,
     PullRequestSummary,
     ResolveGitHubContextInput,
     ResolveGitHubContextOutput,
@@ -287,6 +293,96 @@ async def get_github_pull_request_diff(
     )
 
 
+async def get_github_pull_request(payload: GetPullRequestInput) -> GetPullRequestOutput:
+    """Return consolidated GitHub pull request status for following up on review.
+
+    Use when:
+      - You need a PR's review state in one call: approvals, change requests,
+        mergeability, and outstanding requested reviewers.
+      - You want to read recent conversation comments to follow up on feedback.
+
+    Do not use when:
+      - You need the code diff; use get_github_pull_request_diff instead.
+      - You only need to discover which PRs exist; use list_github_pull_requests.
+
+    Input example:
+      {
+        "context_url": "https://api.github.com/repos/owner/repo",
+        "repository": "owner/repo",
+        "pull_number": 42,
+        "max_comments": 20
+      }
+
+    Returns:
+      PR metadata, mergeability, a derived review_decision plus per-reviewer
+      latest review states, requested reviewers, and up to `max_comments` recent
+      conversation comments.
+
+    Side effects:
+      Read-only. Performs authenticated GET requests to GitHub.
+    """
+
+    context_url = str(payload.context_url)
+    name, ctx = resolve_context(context_url)
+    github = _github_service(name, ctx)
+    token = await async_keychain_get(github.token_keychain)
+
+    pr = await get_pull_request(github.base_url, token, payload.repository, payload.pull_number)
+    reviews = await list_pull_request_reviews(
+        github.base_url, token, payload.repository, payload.pull_number
+    )
+
+    raw_comments: list[dict[str, Any]] = []
+    if payload.max_comments > 0:
+        raw_comments = await list_issue_comments(
+            github.base_url, token, payload.repository, payload.pull_number
+        )
+
+    latest_reviews = _latest_reviews(reviews)
+    approved_by = [r.user_login for r in latest_reviews if r.state == "APPROVED" and r.user_login]
+    changes_requested_by = [
+        r.user_login for r in latest_reviews if r.state == "CHANGES_REQUESTED" and r.user_login
+    ]
+    requested_reviewers = _requested_reviewers(pr)
+    review_decision = _review_decision(changes_requested_by, approved_by, requested_reviewers)
+
+    total_comments = len(raw_comments)
+    comments_truncated = total_comments > payload.max_comments
+    selected_comments = raw_comments[-payload.max_comments :] if payload.max_comments else []
+    comments = [_pull_request_comment(comment) for comment in selected_comments]
+
+    _logger.info(
+        "get_github_pull_request",
+        context=name,
+        repository=payload.repository,
+        pull_number=payload.pull_number,
+        review_decision=review_decision,
+    )
+
+    return GetPullRequestOutput(
+        context=name,
+        number=_int_or_none(pr.get("number")) or payload.pull_number,
+        title=_string_or_none(pr.get("title")),
+        state=_string_or_none(pr.get("state")),
+        draft=_bool_or_none(pr.get("draft")),
+        merged=_bool_or_none(pr.get("merged")),
+        user_login=_nested_string(pr, "user", "login"),
+        head_ref=_nested_string(pr, "head", "ref"),
+        base_ref=_nested_string(pr, "base", "ref"),
+        html_url=_string_or_none(pr.get("html_url")),
+        mergeable=_bool_or_none(pr.get("mergeable")),
+        mergeable_state=_string_or_none(pr.get("mergeable_state")),
+        review_decision=review_decision,
+        approved_by=approved_by,
+        changes_requested_by=changes_requested_by,
+        requested_reviewers=requested_reviewers,
+        reviews=latest_reviews,
+        total_comments=total_comments,
+        comments=comments,
+        comments_truncated=comments_truncated,
+    )
+
+
 async def compare_github_refs(payload: CompareRefsInput) -> CompareRefsOutput:
     """Compare two GitHub refs and return a compact change summary.
 
@@ -397,6 +493,66 @@ def _pull_request_summary(pr: dict[str, Any]) -> PullRequestSummary:
         base_ref=_nested_string(pr, "base", "ref"),
         html_url=_string_or_none(pr.get("html_url")),
         updated_at=_string_or_none(pr.get("updated_at")),
+    )
+
+
+def _latest_reviews(reviews: list[dict[str, Any]]) -> list[PullRequestReview]:
+    """Collapse a PR's review history to each reviewer's most recent decisive state.
+
+    GitHub returns reviews oldest-first. A later COMMENTED review does not
+    override an earlier APPROVED/CHANGES_REQUESTED, so only decisive states
+    replace a reviewer's standing; pending/commented-only reviewers are dropped.
+    """
+
+    decisive = {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}
+    latest: dict[str, PullRequestReview] = {}
+    for review in reviews:
+        login = _nested_string(review, "user", "login")
+        state = _string_or_none(review.get("state"))
+        if login is None or state is None:
+            continue
+        if state in decisive:
+            latest[login] = PullRequestReview(
+                user_login=login,
+                state=state,
+                submitted_at=_string_or_none(review.get("submitted_at")),
+            )
+    return [r for r in latest.values() if r.state != "DISMISSED"]
+
+
+def _requested_reviewers(pr: dict[str, Any]) -> list[str]:
+    requested = pr.get("requested_reviewers")
+    if not isinstance(requested, list):
+        return []
+    logins: list[str] = []
+    for reviewer in requested:
+        login = reviewer.get("login") if isinstance(reviewer, dict) else None
+        if isinstance(login, str):
+            logins.append(login)
+    return logins
+
+
+def _review_decision(
+    changes_requested_by: list[str],
+    approved_by: list[str],
+    requested_reviewers: list[str],
+) -> str:
+    if changes_requested_by:
+        return "changes_requested"
+    if requested_reviewers:
+        return "review_required"
+    if approved_by:
+        return "approved"
+    return "review_required"
+
+
+def _pull_request_comment(comment: dict[str, Any]) -> PullRequestComment:
+    return PullRequestComment(
+        id=int(comment["id"]),
+        user_login=_nested_string(comment, "user", "login"),
+        body=str(comment.get("body") or ""),
+        created_at=_string_or_none(comment.get("created_at")),
+        html_url=_string_or_none(comment.get("html_url")),
     )
 
 
