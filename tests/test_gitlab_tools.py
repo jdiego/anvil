@@ -23,6 +23,7 @@ from anvil.gitlab.models import (
     RetryFailedJobsInput,
     SetMergeRequestReadyInput,
     TriggerPipelineInput,
+    UpdateMergeRequestInput,
 )
 from anvil.gitlab.tools import (
     approve_gitlab_merge_request,
@@ -39,6 +40,7 @@ from anvil.gitlab.tools import (
     retry_gitlab_failed_jobs,
     set_gitlab_mr_ready,
     trigger_gitlab_pipeline,
+    update_gitlab_merge_request,
 )
 
 
@@ -845,6 +847,86 @@ async def test_set_mr_ready_confirmed_updates_draft_false(
 
     assert result.draft is False
     assert route.calls.last.request.content == b'{"draft":false}'
+
+
+def test_update_mr_requires_title_or_description() -> None:
+    with pytest.raises(ValidationError):
+        UpdateMergeRequestInput(
+            context_url="https://gitlab.example.com/group/project",
+            project_path="group/project",
+            mr_iid=7,
+        )
+
+
+@pytest.mark.asyncio
+async def test_update_mr_dry_run_does_not_call_gitlab(
+    fake_contexts_yaml: Path,
+    env_secrets: None,
+) -> None:
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.put(
+            "https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"
+        )
+
+        result = await update_gitlab_merge_request(
+            UpdateMergeRequestInput(
+                context_url="https://gitlab.example.com/group/project",
+                project_path="group/project",
+                mr_iid=7,
+                description="Updated description.",
+                confirm=False,
+            )
+        )
+
+    assert result.dry_run is True
+    assert result.iid == 7
+    assert result.web_url is None
+    assert result.updated_fields == ["description"]
+    assert not route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_update_mr_confirmed_updates_title_and_description(
+    fake_contexts_yaml: Path,
+    env_secrets: None,
+) -> None:
+    route = respx.put(
+        "https://gitlab.example.com/api/v4/projects/group%2Fproject/merge_requests/7"
+    ).mock(
+        return_value=Response(
+            200,
+            json={
+                "iid": 7,
+                "title": "feat: clearer title",
+                "web_url": "https://gitlab.example.com/group/project/-/merge_requests/7",
+            },
+        )
+    )
+
+    result = await update_gitlab_merge_request(
+        UpdateMergeRequestInput(
+            context_url="https://gitlab.example.com/group/project",
+            project_path="group/project",
+            mr_iid=7,
+            title="feat: clearer title",
+            description="Updated rationale and test plan.",
+            confirm=True,
+        )
+    )
+
+    assert result.dry_run is False
+    assert result.iid == 7
+    assert result.title == "feat: clearer title"
+    assert str(result.web_url) == "https://gitlab.example.com/group/project/-/merge_requests/7"
+    assert result.updated_fields == ["description", "title"]
+
+    sent = json.loads(route.calls.last.request.content)
+    assert sent == {
+        "title": "feat: clearer title",
+        "description": "Updated rationale and test plan.",
+    }
+    assert route.calls.last.request.headers["PRIVATE-TOKEN"] == "gitlab-token"
 
 
 @pytest.mark.asyncio

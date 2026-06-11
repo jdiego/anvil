@@ -11,6 +11,7 @@ from anvil.github.tools import (
     get_github_workflow_run_status,
     list_github_pull_requests,
     resolve_github_context,
+    update_github_pull_request,
 )
 from anvil.gitlab.tools import (
     approve_gitlab_merge_request,
@@ -27,6 +28,7 @@ from anvil.gitlab.tools import (
     retry_gitlab_failed_jobs,
     set_gitlab_mr_ready,
     trigger_gitlab_pipeline,
+    update_gitlab_merge_request,
 )
 from anvil.logging import configure_logging, get_logger
 from anvil.prompts import (
@@ -103,7 +105,9 @@ def build_server() -> FastMCP:
     # Destructive tools — mutate upstream state, gated behind a confirm flag.
     destructive_tools = (
         (create_github_pull_request, "Create GitHub Pull Request"),
+        (update_github_pull_request, "Update GitHub Pull Request"),
         (create_gitlab_merge_request, "Create GitLab Merge Request"),
+        (update_gitlab_merge_request, "Update GitLab Merge Request"),
         (retry_gitlab_failed_jobs, "Retry GitLab Failed Jobs"),
         (cancel_gitlab_pipeline, "Cancel GitLab Pipeline"),
         (post_gitlab_mr_comment, "Post GitLab MR Comment"),
