@@ -45,10 +45,12 @@ Current tools:
 - `retry_gitlab_failed_jobs` — destructive, retries only failed CI jobs after confirmation.
 - `cancel_gitlab_pipeline` — destructive, cancels a pipeline after confirmation.
 - `list_gitlab_merge_requests` — read-only, lists compact MR summaries.
+- `get_gitlab_merge_request` — read-only, consolidated MR status: approvals, mergeability, unresolved threads, recent notes.
 - `compare_gitlab_refs` — read-only, compares refs and returns commit/diff counts.
 - `get_gitlab_mr_diff` — read-only, returns MR metadata + bounded per-file diffs.
 - `resolve_github_context` — read-only, no upstream call.
 - `list_github_pull_requests` — read-only, lists compact GitHub PR summaries.
+- `get_github_pull_request` — read-only, consolidated PR status: review decision, approvals/change requests, mergeability, recent comments.
 - `get_github_pull_request_diff` — read-only, returns PR metadata + bounded per-file patches.
 - `compare_github_refs` — read-only, compares refs and returns compact commit/file counts.
 - `get_github_workflow_run_status` — read-only, returns workflow run metadata + jobs.

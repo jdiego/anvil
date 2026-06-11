@@ -102,6 +102,77 @@ class CreatePullRequestOutput(BaseModel):
     )
 
 
+class GetPullRequestInput(GitHubRepositoryInput):
+    pull_number: int = Field(ge=1, description="GitHub pull request number.")
+    max_comments: int = Field(
+        default=20,
+        ge=0,
+        le=100,
+        description=(
+            "Maximum recent conversation comments to include. "
+            "Set 0 to skip comments and only return review/merge status."
+        ),
+    )
+
+
+class PullRequestReview(BaseModel):
+    user_login: str | None = None
+    state: str | None = Field(
+        default=None,
+        description="Latest review state per reviewer, e.g. APPROVED or CHANGES_REQUESTED.",
+    )
+    submitted_at: str | None = None
+
+
+class PullRequestComment(BaseModel):
+    id: int
+    user_login: str | None = None
+    body: str
+    created_at: str | None = None
+    html_url: HttpUrl | None = None
+
+
+class GetPullRequestOutput(BaseModel):
+    context: str
+    number: int
+    title: str | None = None
+    state: str | None = None
+    draft: bool | None = None
+    merged: bool | None = None
+    user_login: str | None = None
+    head_ref: str | None = None
+    base_ref: str | None = None
+    html_url: HttpUrl | None = None
+    mergeable: bool | None = Field(
+        default=None,
+        description="GitHub mergeable flag; null while GitHub is still computing it.",
+    )
+    mergeable_state: str | None = Field(
+        default=None,
+        description="GitHub mergeable_state, e.g. 'clean', 'blocked', 'dirty', 'behind'.",
+    )
+    review_decision: str | None = Field(
+        default=None,
+        description=(
+            "Derived summary: 'approved', 'changes_requested', 'review_required', or 'commented'."
+        ),
+    )
+    approved_by: list[str] = Field(default_factory=list)
+    changes_requested_by: list[str] = Field(default_factory=list)
+    requested_reviewers: list[str] = Field(
+        default_factory=list, description="Reviewers requested but who have not yet reviewed."
+    )
+    reviews: list[PullRequestReview] = Field(
+        default_factory=list, description="Latest submitted review state per reviewer."
+    )
+    total_comments: int = Field(default=0, description="Conversation comments reported by GitHub.")
+    comments: list[PullRequestComment] = Field(default_factory=list)
+    comments_truncated: bool = Field(
+        default=False, description="True when more comments exist than were returned."
+    )
+    warnings: list[str] = Field(default_factory=list)
+
+
 class UpdatePullRequestInput(GitHubRepositoryInput):
     pull_number: int = Field(ge=1, description="GitHub pull request number to update.")
     title: str | None = Field(
